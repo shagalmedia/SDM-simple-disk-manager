@@ -2,8 +2,7 @@ import sys
 import os
 import psutil
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QProgressBar
-from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, pyqtSlot
-from PyQt5.QtGui import QMovie
+from PyQt5.QtCore import Qt, QTimer
 
 def get_drives_info():
     drives = []
@@ -19,19 +18,6 @@ def get_drives_info():
         }
         drives.append(drive_info)
     return drives
-
-class DiskAccessThread(QThread):
-    access_started = pyqtSignal()
-    access_finished = pyqtSignal()
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-
-    def run(self):
-        # Имитация доступа к диску на протяжении 3 секунд
-        self.access_started.emit()
-        self.sleep(3)
-        self.access_finished.emit()
 
 class MainWindow(QWidget):
     def __init__(self):
@@ -57,12 +43,11 @@ class MainWindow(QWidget):
         self.setLayout(self.layout)
 
         self.timer = QTimer(self)
-        self.timer.timeout.connect(self.update_table)
-        self.timer.start(5000)  # Обновление таблицы каждые 5 секунд
+        self.timer.timeout.connect(self.check_disk_access)
+        self.timer.start(1000)  # Проверка доступа к диску каждую секунду
 
-        self.disk_access_thread = DiskAccessThread()
-        self.disk_access_thread.access_started.connect(self.show_disk_access_label)
-        self.disk_access_thread.access_finished.connect(self.hide_disk_access_label)
+        self.disk_states = {}  # Состояния дисков (True - доступ, False - отключен)
+        self.previous_disks = []  # Предыдущее состояние дисков
 
         self.update_table()
 
@@ -87,11 +72,29 @@ class MainWindow(QWidget):
             progress_bar.setValue(int(disk["percent"]))
             self.disks_table.setCellWidget(i, len(disk), progress_bar)
 
+    def check_disk_access(self):
+        current_disks = get_drives_info()
+        disk_accessed = False
+
+        for disk in current_disks:
+            device = disk["device"]
+            if device in self.disk_states:
+                if self.disk_states[device] != disk["used"]:
+                    disk_accessed = True
+                    self.disk_states[device] = disk["used"]
+            else:
+                self.disk_states[device] = disk["used"]
+
+        if disk_accessed:
+            self.show_disk_access_label()
+        else:
+            self.hide_disk_access_label()
+
+        self.previous_disks = current_disks
+
     def show_disk_access_label(self):
-        self.access_label.setText("Accessing Disk...")
-        movie = QMovie("loader.gif")
-        self.access_label.setMovie(movie)
-        movie.start()
+        self.access_label.setText("Disk Access")
+        self.access_label.setStyleSheet("background-color: green; color: white;")
         self.access_label.show()
 
     def hide_disk_access_label(self):
@@ -102,8 +105,6 @@ class MainWindow(QWidget):
             selected_rows = self.disks_table.selectionModel().selectedRows()
             for row in reversed(selected_rows):
                 self.disks_table.removeRow(row.row())
-        elif event.key() == Qt.Key_Space:
-            self.disk_access_thread.start()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
